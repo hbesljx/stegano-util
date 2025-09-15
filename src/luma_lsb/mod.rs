@@ -1,6 +1,6 @@
 use crate::image_tools::{rgb_to_ycbcr,ycbcr_to_rgb};
 use image::{GenericImageView, ImageBuffer, Luma, Rgb, RgbImage};
-
+use std::path::Path;
 
 fn lsb_one_bit(buff:u8,msg:u8)->u8{ //先隐写1bit到1byte中
     let bit = msg & 1;  //保证是0或1
@@ -30,7 +30,7 @@ fn lsb(y_buff: &mut ImageBuffer<Luma<u8>, Vec<u8>>, msg: &[u8]) {
         }
     }
 }
-pub fn hide(img_path: &str, bin_path: &str) -> Result<(), &'static str> {
+pub(crate) fn hide(img_path: &str, bin_path: &str) -> Result<(), &'static str> {
     let img = image::open(img_path).unwrap();
     let (width, height) = img.dimensions();
 
@@ -78,77 +78,86 @@ pub fn hide(img_path: &str, bin_path: &str) -> Result<(), &'static str> {
 
     Ok(())
 }
-pub fn luma_lsb_read(output_path:&str)->Vec<u8>{
-    let img=image::open(output_path).unwrap();
-    let (width,height)=img.dimensions();
 
-    let mut y_buff:ImageBuffer<Luma<u8>, Vec<_>>=ImageBuffer::new(width, height);
-    let mut cb_buff:ImageBuffer<Luma<u8>, Vec<_>>=ImageBuffer::new(width, height);
-    let mut cr_buff:ImageBuffer<Luma<u8>, Vec<_>>=ImageBuffer::new(width, height);
+pub(crate) fn read(output_path: &str) -> Result<Vec<u8>, String> {
+    if !Path::new(output_path).exists() {
+        return Err(format!("文件不存在: {}", output_path));
+    }
 
-    for y in 0..height{
-        for x in 0..width{
-            let [r,g,b,_a]=img.get_pixel(x, y).0;
-            let ycbcr=rgb_to_ycbcr(r, g, b);
+    let img = image::open(output_path).map_err(|e| format!("无法打开或解码图片: {}", e))?;
+    let (width, height) = img.dimensions();
 
+    let mut y_buff: ImageBuffer<Luma<u8>, Vec<_>> = ImageBuffer::new(width, height);
+    let mut cb_buff: ImageBuffer<Luma<u8>, Vec<_>> = ImageBuffer::new(width, height);
+    let mut cr_buff: ImageBuffer<Luma<u8>, Vec<_>> = ImageBuffer::new(width, height);
+
+    for y in 0..height {
+        for x in 0..width {
+            let [r, g, b, _a] = img.get_pixel(x, y).0;
+            let ycbcr = rgb_to_ycbcr(r, g, b);
             y_buff.put_pixel(x, y, Luma([ycbcr.0]));
             cb_buff.put_pixel(x, y, Luma([ycbcr.1]));
             cr_buff.put_pixel(x, y, Luma([ycbcr.2]));
         }
     }
-    let mut msg_len_bits=vec![0u8;32];  //先读前32bit作为长度
-    let mut flag=0;
-    for y in 0..height{
-        for x in 0..width{
-            if flag>=32{
+
+    let mut msg_len_bits = Vec::with_capacity(32);
+    let mut flag = 0;
+    for y in 0..height {
+        for x in 0..width {
+            if flag >= 32 {
                 break;
             }
-            msg_len_bits[flag]=y_buff.get_pixel(x, y)[0]&1;
-            flag+=1;
+            let bit = y_buff.get_pixel(x, y)[0] & 1;
+            msg_len_bits.push(bit);
+            flag += 1;
         }
-        if flag>=32{
+        if flag >= 32 {
+            break;
+        }
+    }
+    let mut msg_len_bytes = [0u8; 4];
+    for i in 0..4 {
+        let mut byte = 0u8;
+        for j in 0..8 {
+            let bit = msg_len_bits[j + i * 8];
+            byte |= bit << j;
+        }
+        msg_len_bytes[i] = byte;
+    }
+    let data_len = u32::from_le_bytes(msg_len_bytes) as usize;
+
+    let total_bits = (data_len + 4) * 8;
+    let mut all_bits = Vec::with_capacity(total_bits);
+    let mut count = 0;
+    for y in 0..height {
+        for x in 0..width {
+            if count >= total_bits {
+                break;
+            }
+            let bit = y_buff.get_pixel(x, y)[0] & 1;
+            all_bits.push(bit);
+            count += 1;
+        }
+        if count >= total_bits {
             break;
         }
     }
 
-    let mut msg_len_bytes=[0u8;4];
-    for i in 0..4{
-        let mut byte=0u8;
-        for j in 0..8{
-            let bit=msg_len_bits[j+i*8];
-            byte|=bit<<j;
-        }
-        msg_len_bytes[i]=byte;
+    if all_bits.len() < total_bits {
+        return Err("图片中数据不完整，可能未隐藏信息或损坏".to_string());
     }
-    let olen=u32::from_le_bytes(msg_len_bytes);
 
-    let len=((olen+4)*8) as usize;
-    let mut msg_all=Vec::with_capacity(len);
-    let mut count=0;
-    for y in 0..height{
-        for x in 0..width{
-            if count>=len{
-                break;
-            }
-            let tmp=y_buff.get_pixel(x, y)[0]&1;
-            msg_all.push(tmp);
-            count+=1;
+    let data_bits = &all_bits[32..];
+    let mut data_bytes = Vec::with_capacity(data_len);
+    for i in 0..data_len {
+        let mut byte = 0u8;
+        for j in 0..8 {
+            let bit = data_bits[j + i * 8];
+            byte |= bit << j;
         }
-        if count>=len{
-            break;
-        }
+        data_bytes.push(byte);
     }
-    let msg_bit=&msg_all[32..];
 
-    let mut msg_byte:Vec<u8>=Vec::with_capacity(olen as usize);
-    for i in 0..(olen as usize){
-        let mut byte=0u8;
-        for j in 0..8{
-            let bit=msg_bit[j+i*8];
-            byte|=bit<<j;
-        }
-        msg_byte.push(byte);
-    }
-    // println!("{:?}",&msg_bit);
-    msg_byte
+    Ok(data_bytes)
 }

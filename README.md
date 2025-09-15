@@ -6,15 +6,22 @@
 
 示例：
 ```
-use stegano_util::{luma_lsb::luma_lsb_read, luma_lsb_hide};
+use stegano_util::luma_lsb_hide;
+use stegano_util::luma_lsb_read;
 
 #[test]
 fn test_luma_lsb_hide(){
     let img_path:&str="./tests/input.jpg";
-    let bin_path:&str="./tests/test.bin";
+    let less_bin_path:&str="./tests/less.bin";
+    let more_bin_path:&str="./tests/more.bin";
 
-    let res=luma_lsb_hide(img_path, bin_path);
-    match res {
+    let res1=luma_lsb_hide(img_path, less_bin_path);
+    match res1 {
+        Ok(_)=>{println!("隐写成功!");},
+        Err(err)=>{println!("{}",&err);}
+    }
+    let res2=luma_lsb_hide(img_path, more_bin_path);
+    match res2 {
         Ok(_)=>{println!("隐写成功!");},
         Err(err)=>{println!("{}",&err);}
     }
@@ -24,14 +31,12 @@ fn test_luma_lsb_hide(){
 fn test_luma_lsb_read(){
     let output_path="./output.png";
     let res3=luma_lsb_read(output_path);
-    let mut text=Vec::new();
     match res3 {
-        Ok(value)=>{text=value;},
+        Ok(value)=>{println!("{:?}",value.iter().map(|b| format!("{:02x}", b)).collect::<String>());},
         Err(err)=>{
             println!("{}",err);
             return;
         }
     }
-    println!("{}",text.iter().map(|b| format!("{:02x}", b)).collect::<String>());
 }
 ```
