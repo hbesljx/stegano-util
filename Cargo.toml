@@ -1,0 +1,13 @@
+[package]
+name = "stegano-util"
+version = "0.1.0"
+edition = "2024"
+description = "A tool for steganographically embedding files into images."
+license = "MIT"
+authors = ["hit_ljx@yeah.net"]
+repository = "https://github.com/hbesljx/stegano-util.git"  # 推荐填写
+keywords = ["steganography", "image"]
+categories = ["multimedia::images"]
+
+[dependencies]
+image = "0.25.8"
